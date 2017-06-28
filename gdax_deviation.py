@@ -247,9 +247,9 @@ class RealTimeTrader(Trader):
 
 if __name__ == '__main__':
     # Settig variables.
-    key = '5d8cb58f2018b6b6c70230ee0b4848d5'
-    secret = 'ZSQF22oo8q9PoaF9/pSLv95IwAn9YgiW3YecNLil3UwWYbA18DzmiOGuKCFyqlrwfvvaPA3GJ/8h7NzDMLGluA=='
-    passphrase = 'q6n97g56pa'
+    key = ''
+    secret = ''
+    passphrase = ''
     client = gdax.AuthenticatedClient(key, secret, passphrase)
     product = 'BTC-USD'
     startDate = '2017-06-19'
