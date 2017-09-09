@@ -1,0 +1,3 @@
+key = '16af2237405046a198984dc9aceea4ce'
+secret = 'nGPuHBm12Wp/u0mYX3sTMQpGPp5ABBsXBOhaICycgD88/nQk+H1wRy1MS0VqDe0zC1ST83P78ig7LH18IZbDeQ=='
+passphrase = 'o8ud5zxcg'

@@ -22,9 +22,10 @@ class DataFeeder():
         super().__init__()
         self.strategy = strategy
         self.subscribers = []
+
         
-        
-    def append_data(client, df, product, columns, start_timestamp, 
+    @classmethod
+    def append_data(cls, client, df, product, columns, start_timestamp, 
                     end_timestamp, granularity=1):
         newData = client.get_product_historic_rates(product, 
                          dt.datetime.fromtimestamp(start_timestamp).isoformat(),
@@ -39,7 +40,8 @@ class DataFeeder():
         raise NotImplementedError
     
     
-    def get_product_historic_rates(self, client, product, start_date, end_date, 
+    @classmethod
+    def get_historic_rates(cls, client, product, start_date, end_date, 
                                    granularity=1):
         """
         Gets the historical data of a product making the necessary
@@ -63,11 +65,11 @@ class DataFeeder():
         # Populating dataframe.
         for i in tqdm(range(len(timeRange) - 1)):
             try:
-                data = self.append_data(client, data, product, columns, 
+                data = cls.append_data(client, data, product, columns, 
                                         timeRange[i], timeRange[i+1])
             except ValueError:
                 time.sleep(3)
-                data = self.append_data(data, columns, product, 
+                data = cls.append_data(data, columns, product, 
                                         timeRange[i], timeRange[i+1])
         
         # Reindexing dataframe.
@@ -124,3 +126,25 @@ class RealTimeFeeder(DataFeeder, gdax.WebsocketClient):
     def feed(self, data):
         self.strategy.calculate(data[0], float(data[1]), data[2])
         
+
+class AllMesages(gdax.WebsocketClient):
+    """
+    Data feeder that uses the gdax API to feed real time data
+    to a strategy.
+    It filters the incoming messages to provide only 'match' messages.
+    """    
+    def on_open(self):
+        self.url = "wss://ws-feed.gdax.com/"
+        self.products = ['BTC-USD']
+
+    def on_message(self, msg):
+        print(msg)
+    
+    def feed(self, data):
+        self.strategy.calculate(data[0], float(data[1]), data[2])
+        
+        
+if __name__ == "__main__":
+    f = AllMesages()
+    f.start()
+    

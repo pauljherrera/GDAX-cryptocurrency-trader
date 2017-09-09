@@ -8,6 +8,7 @@ Created on Thu Jun 29 11:02:18 2017
 import sys
 import pandas as pd
 import datetime as dt
+import gdax
 
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QFrame, 
                              QSplitter, QStyleFactory, QApplication, QLabel, 
@@ -16,9 +17,9 @@ from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QFrame,
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QFont, QTextCursor
 
-from data_feeder import HistoricalDataFeeder, RealTimeFeeder
-from strategy import DeviationStrategy
-from trader import PaperTrader    
+from core.data_feeder import HistoricalDataFeeder, RealTimeFeeder
+from core.strategy import DeviationStrategy
+from core.trader import PaperTrader, RealTimeTrader  
 
 
 class GDAXGUI(QWidget):
@@ -27,8 +28,9 @@ class GDAXGUI(QWidget):
         super().__init__()
         self.product = 'BTC-USD'
         self.dataFeeder = RealTimeFeeder
-        self.trader = PaperTrader()
+        self.trader = PaperTrader
         self.data = None
+        self.client = None
         self.period = 0
         self.EntryStd = 0
         self.ExitStd = 0
@@ -130,13 +132,60 @@ class GDAXGUI(QWidget):
         strategyVBox.addLayout(HBox02(label='Periods'))
         strategyVBox.addLayout(HBox02(label='Entry Standard Deviations'))
         strategyVBox.addLayout(HBox02(label='Exit Standard Deviations'))
-        strategyVBox.addLayout(startHBox)
+        
+        # Trading box
+        PaperTradingCB = CheckBox01({
+                'trader': PaperTrader,
+                'API' : None,
+                'credentials': None
+            },  
+            'Paper trading'
+        )
+        SandboxTradingCB = CheckBox01({
+                'trader': RealTimeTrader,
+                'API' : "https://api-public.sandbox.gdax.com",
+                'credentials': {
+                    'key': '5205d9e094b7d81bbed705a75be79542',
+                    'secret': r'+kETnK7fsuaJ4fpi5PgWIm/ctcL8cK68HSO7O1scNFYl6ebTWH7cUggnc+YFwVY/Dzhxe6SxZiIyTgYEudbM3w==',
+                    'passphrase': 'knwmt1dx7cm',
+                }
+            }, 
+            'Sandbox trading'
+        )
+        
+        RealTradingCB = CheckBox01({
+                'trader': RealTimeTrader,
+                'API' : "https://api.gdax.com",
+                'credentials': {
+                    'key': '',
+                    'secret': '',
+                    'passphrase': '',
+                }
+            }, 
+            'Real time trading'
+        )
+        PaperTradingCB.toggle()
+        PaperTradingCB.subscribe(SandboxTradingCB)
+        PaperTradingCB.subscribe(RealTradingCB)
+        SandboxTradingCB.subscribe(PaperTradingCB)
+        SandboxTradingCB.subscribe(RealTradingCB)
+        RealTradingCB.subscribe(PaperTradingCB)
+        RealTradingCB.subscribe(SandboxTradingCB)
+        tradingTitleHBox = HBox01(widget=Label01('Trading'))
+        
+        tradingVBox = QVBoxLayout()
+        tradingVBox.addLayout(tradingTitleHBox)
+        tradingVBox.addWidget(PaperTradingCB)
+        tradingVBox.addWidget(SandboxTradingCB)
+        tradingVBox.addWidget(RealTradingCB)
+        tradingVBox.addLayout(startHBox)
 
         # Left layout.
         leftVBox = QVBoxLayout(left)
         leftVBox.addLayout(productVBox)
         leftVBox.addLayout(dataVBox)
         leftVBox.addLayout(strategyVBox)
+        leftVBox.addLayout(tradingVBox)
         leftVBox.addStretch(1)
         
                 
@@ -179,6 +228,11 @@ class GDAXGUI(QWidget):
         ql02.textChanged[str].connect(self.entryStdChange)
         ql03.textChanged[str].connect(self.exitStdChange)
         
+        # Data events.
+        PaperTradingCB.clicked.connect(self.tradingBoxChecked)
+        SandboxTradingCB.clicked.connect(self.tradingBoxChecked)
+        RealTradingCB.clicked.connect(self.tradingBoxChecked)
+        
         # Start event.
         startButton.clicked.connect(self.start)
         
@@ -198,10 +252,14 @@ class GDAXGUI(QWidget):
             self.incomingTextEdit.insertPlainText("Openning communication with GDAX.\n")
         except TypeError:
             feeder = self.dataFeeder(strategy)
+        if self.client:
+            self.trader = self.trader(self.client, self.product)
+        else:
+            self.trader = self.trader()
         strategy.subscribe(self.trader)
         
         dataReceiver = DataFeederReceiver(self)
-        signalsReceiver = PaperTraderReceiver(self)
+        signalsReceiver = TraderReceiver(self)
         feeder.subscribe(dataReceiver)
         self.trader.subscribe(signalsReceiver)
         
@@ -230,7 +288,23 @@ class GDAXGUI(QWidget):
         sender.publish()
         # Assigning DataFeeder to backtester.
         self.dataFeeder = sender.inObject
-        print(self.dataFeeder)
+        
+    def tradingBoxChecked(self):
+        sender = self.sender()
+        print(sender.inObject)
+        # Toggling other check boxes.
+        sender.publish()
+        # Assigning DataFeeder to backtester.
+        self.trader = sender.inObject['trader']
+        credentials = sender.inObject['credentials']
+        if credentials:
+            self.client = gdax.AuthenticatedClient(credentials['key'],
+                                                   credentials['secret'],
+                                                   credentials['passphrase'],
+                                                   sender.inObject['API'])
+        else:
+            self.client = None
+        print(self.client)
         
     def fileButtonClicked(self):
         fname = QFileDialog.getOpenFileName(self, 'Open file', 'data_files/')
@@ -327,6 +401,7 @@ class CheckBox01(QCheckBox):
         for s in self.subscribers:
             if s.isChecked():
                 s.toggle()
+    
         
 # Helping classes:
 class Receiver():
@@ -340,14 +415,14 @@ class DataFeederReceiver(Receiver):
     def receive(self, msg):
         _time = dt.datetime.strptime(msg[0], "%Y-%m-%dT%H:%M:%S.%fZ")\
                            .replace(microsecond=0)
-        self.gui.incomingTextEdit.moveCursor(QTextCursor.End)
+#        self.gui.incomingTextEdit.moveCursor(QTextCursor.End)
         self.gui.incomingTextEdit.insertPlainText("{}   {}   {}\n"\
             .format(_time, round(float(msg[1]), 2), msg[2]))
 #        print(msg)
 
-class PaperTraderReceiver(Receiver):
+class TraderReceiver(Receiver):
     def receive(self, msg):
-        self.gui.signalsTextEdit.moveCursor(QTextCursor.End)
+#        self.gui.signalsTextEdit.moveCursor(QTextCursor.End)
         self.gui.signalsTextEdit.insertPlainText("{0}   {2}   {1}\n".format(*msg))
 #        print(msg)
         
