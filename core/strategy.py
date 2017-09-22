@@ -14,11 +14,12 @@ class Strategy():
     """
     Abstract Base Class for strategies.
     """
-    def __init__(self):
+    def __init__(self, trader=None):
         self.subscribers = []
-        self.accountState = 'CLOSE'
+        self.account_state = 'CLOSE'
         self.ask = [0]
         self.bid = [0]
+        self.trader = trader
     
     def calculate(self):
         raise NotImplementedError
@@ -48,17 +49,17 @@ class DeviationStrategy(Strategy):
         except ValueError:
             _time = pd.to_datetime(_time)            
            
-        
         # Updating data and entry logic.
         if (_type == 'ASK') \
         and (tick != self.ask[-1]) \
         and (_time >= self.lastAskTimestamp + dt.timedelta(seconds=1)):
+            
             print(_time, tick, _type)
             # Updating ask data.
             self.ask.append(tick)
             self.lastAskTimestamp = _time
             # Entry logic.
-            if (self.accountState == 'CLOSE') \
+            if (self.account_state == 'CLOSE') \
             and (len(self.ask) >= self.period + 1):
                 mean = np.mean(self.ask[-self.period:])
                 std = np.std(self.ask[-self.period:])
@@ -66,7 +67,8 @@ class DeviationStrategy(Strategy):
                 print('Ask Std Dev: {} - {}'.format(lowStd, tick))
                 
                 if tick < lowStd:
-                    self.send_signal((_time, 'BUY', tick))
+                    self.trader.send_limit_order('BUY', tick)
+                    self.account_state = 'BUY'
                     # Setting Stop Loss.
                     self.current_stop_loss = tick - self.stop_loss
             
@@ -74,27 +76,30 @@ class DeviationStrategy(Strategy):
         elif (_type == 'BID') \
         and (tick != self.bid[-1]) \
         and (_time >= self.lastBidTimestamp + dt.timedelta(seconds=1)):
+            
             print(_time, tick, _type)
             # Updating bid data.
             self.bid.append(tick)
             self.lastBidTimestamp = _time
             # Exit logic.
-            if (self.accountState == 'BUY') \
+            if (self.account_state == 'BUY') \
             and (len(self.bid) >= self.period + 1):
                 mean = np.mean(self.bid[-self.period:])
                 std = np.std(self.bid[-self.period:])
                 highStd = mean + self.exitStd * std
                 print('Bid Std Dev: {} - {}'.format(highStd, tick))
-
-                if (tick > highStd) or (tick < self.current_stop_loss):
-                    self.send_signal((_time, 'CLOSE', tick))
-                                  
-    
-    def send_signal(self, signal):
-        for s in self.subscribers:
-            s.notify(signal)
-        self.accountState = signal[1]
-
                 
-    def subscribe(self, subscriber):
-        self.subscribers.append(subscriber)
+                # Profitable exit.
+                if tick > highStd:
+                    self.trader.send_limit_order('CLOSE', tick)
+                    self.account_state = 'CLOSE'
+                    
+                # Stop Loss exit
+                if (tick < self.current_stop_loss):
+                    self.trader.send_market_order('CLOSE', tick)
+                    self.account_state = 'CLOSE'
+                    print("Stop Loss hit")              
+    
+        
+        
+        

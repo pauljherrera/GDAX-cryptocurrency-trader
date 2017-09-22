@@ -8,9 +8,9 @@ Created on Mon Jun 26 15:23:10 2017
 import sys
 import gdax
 
-from core.data_feeder import HistoricalDataFeeder, RealTimeFeeder
+from core.data_feeder import RealTimeFeeder
 from core.strategy import DeviationStrategy
-from core.trader import PaperTrader, RealTimeTrader    
+from core.trader import Trader    
 
 
 def get_arg(index, default):
@@ -26,25 +26,19 @@ if __name__ == '__main__':
     secret = '4c/r3Ak/pT0+Llqr54Myx8lPjuVlKXf0TM3eQSqXCIeXjgJn92atSA+is+CARSjBYzr0Gyx7k53ALH5LRGERmA=='
     passphrase = 'bz4w6b9z7f'
     product = get_arg(1, 'BTC-USD')
-#    startDate = '2017-06-19'
-#    endDate = '2017-06-26'
     period = int(get_arg(2, 10))
-    entry_std = float(get_arg(3, 0.5))
-    exit_std = float(get_arg(4, 0.5))
-    stop_loss = float(get_arg(5, 20))
+    entry_std = float(get_arg(3, 1))
+    exit_std = float(get_arg(4, 1))
+    stop_loss = float(get_arg(5, 5))
     size = float(get_arg(6, 0.01))
-  
-    # Setting client and data.
-#    data = pd.read_csv('BTC-USD_20170619-20170626.csv', index_col=0)
-    
+      
     # Initializing objects.
     client = gdax.AuthenticatedClient(key, secret, passphrase)
-    strategy = DeviationStrategy(period=period, entry_std=entry_std, exit_std=exit_std)
+    strategy = DeviationStrategy(period=period, entry_std=entry_std, 
+                                 exit_std=exit_std, stop_loss=stop_loss)
     feeder = RealTimeFeeder(strategy)
-    trader = RealTimeTrader(client, size=0.01, orders_type='limit')
-    
-    # Subscriptions.
-    strategy.subscribe(trader)
+    trader = Trader(client, product=product, size=0.01)
+    strategy.trader = trader
     
     # Backtest.
     feeder.start()

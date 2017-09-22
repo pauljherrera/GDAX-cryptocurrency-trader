@@ -6,91 +6,105 @@ Created on Thu Jun 29 15:56:48 2017
 """
 
 import pandas as pd
+
+import threading
+
+from time import sleep
 # from winsound import Beep
 
 
-class Trader():
-    """
-    Abstract Base Class. A trader receives the signals from
-    the strategy.
-    """
-    def notify(self, msg):
-        raise NotImplementedError
-        
-    def publish(self, msg):
-        for s in self.subscribers:
-            s.receive(msg)        
-
-    def subscribe(self, subscriber):
-        self.subscribers.append(subscriber)
-
-
-class PaperTrader(Trader):
-    """
-    Saves the signals in a pandas dataframe.
-    """
-    def __init__(self):
-        super().__init__()
-        self._columns = ['time', 'type', 'price']
-        self.trades = pd.DataFrame(columns=self._columns)
-        self.subscribers = []
-        
-    
-    def notify(self, msg):
-        self.trades = pd.concat([self.trades, pd.DataFrame([msg], 
-                                              columns=self._columns)])
-        self.publish(msg)
                     
     
-class RealTimeTrader(Trader):
+class Trader:
     """
     Trades in real time through the gdax API.
     It takes a client object as first initialization parameter, so a
     'sandbox' client could be passed.
     """
     def __init__(self, client, product='BTC-USD', 
-                 orders_type='market', size=0.01):
+                 size=0.01, monitor=True):
         self.client = client
         self.product = product
         self.size = size
-        self.orderId = 0
-        self.order_type = orders_type
-        self.subscribers = []
+        self.pending_limit_order_flag = False
+        self.last_order_id = None
+        if monitor:
+            thread = threading.Thread(target=self.monitor_pending_orders, args=())
+            thread.daemon = True                            
+            thread.start()
+        
     
     def check_pending_orders(self):
-        pending_orders = len(self.client.get_orders()[0])
-        if pending_orders == 0:
-            return False
-        elif pending_orders == 1:
-            return True
-        else:
-            print('Error: more than one pending order.')
+        """
+        Checks if the last order is still pending. If the last limit order 
+        status turns to 'done', the method toggles the pending_limit_order_flag.
+        """
+        if self.last_order_id and self.pending_limit_order_flag:
+            try:
+                status = self.client.get_order(self.last_order_id)['status']
+                if status == 'done':
+                    self.pending_limit_order_flag = False
+            except:
+                pass
+
+            
+    def monitor_pending_orders(self, time=30):
+        while True:
+            print("Monitoring pending orders.")
+            if self.pending_limit_order_flag == True:
+                self.check_pending_orders()
+            sleep(time)
         
-    def notify(self, msg):
+    def send_market_order(self, _type, price):
+        """
+        Sends a market order. It receives a price parameter to avoid
+        calling to the API for the current price of the asset.
+        _type: str. "BUY"/"CLOSE"
+        price: str. 
+        """
         print('\n\n')
-        print(msg)
+        print(_type, price)
         print('\n\n')
-#        Beep(500, 500)
         
-        if self.order_type == 'market':
-            if msg[1] == 'BUY':
-                r = self.client.buy(price=msg[2], size=self.size, 
-                                    product_id=self.product)
-                self.orderId = r['id']
-            elif msg[1] == 'CLOSE':
-                r = self.client.sell(price=msg[2], size=self.size, 
-                                     product_id=self.product)
+        if _type == 'BUY':
+            self.client.buy(price=price, size=self.size, 
+                            product_id=self.product)
+        elif _type == 'CLOSE':
+            self.client.sell(price=price, size=self.size, 
+                             product_id=self.product)
+                
+                
+    def send_limit_order(self, _type, price):
+        print('\n\n')
+        print(_type, price)
+        print('\n\n')                
         
-        if self.order_type == 'limit':
-            if msg[1] == 'BUY':
-                r = self.client.buy(price=self.client.get_product_ticker(self.product)['bid'], 
-                                    type='limit', 
-                                    size=self.size,
-                                    product_id=self.product)
-                self.orderId = r['id']
-            elif msg[1] == 'CLOSE':
-                r = self.client.sell(price=self.client.get_product_ticker(self.product)['ask'], 
-                                    type='limit', 
-                                    size=self.size,
-                                    product_id=self.product)
-        
+        # Places a buy order if there's no pending limit order.
+        if (_type == 'BUY'):
+            if (self.pending_limit_order_flag == False):
+                price = str(round(float(self.client.get_product_ticker('BTC-USD')['ask']) - 0.01, 2))
+                r = self.client.buy(price=price, type='limit', 
+                                    size=self.size, product_id=self.product)
+                print(r)
+                self.last_order_id = r['id']
+                self.pending_limit_order_flag = True
+            else:
+                self.client.cancel_order(self.last_order_id)
+                self.pending_limit_order_flag = False
+                print("Cancelling an unfilled order")
+            
+        # Places a sell order if there's no pending limit order.   
+        elif (_type == 'CLOSE'):
+            if (self.pending_limit_order_flag == False):
+                price = str(round(float(self.client.get_product_ticker('BTC-USD')['bid']) + 0.01, 2))
+                r = self.client.sell(price=price, type='limit', 
+                                     size=self.size, product_id=self.product)
+                self.last_order_id = r['id']
+                self.pending_limit_order_flag = True
+            else:
+                self.client.cancel_order(self.last_order_id)
+                self.pending_limit_order_flag = False
+                print("Cancelling an unfilled order")
+
+
+
