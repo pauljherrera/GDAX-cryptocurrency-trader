@@ -21,82 +21,11 @@ class DataFeeder():
     def __init__(self, strategy):
         super().__init__()
         self.strategy = strategy
-        self.subscribers = []
-
-        
-    @classmethod
-    def append_data(cls, client, df, product, columns, start_timestamp, 
-                    end_timestamp, granularity=1):
-        newData = client.get_product_historic_rates(product, 
-                         dt.datetime.fromtimestamp(start_timestamp).isoformat(),
-                         dt.datetime.fromtimestamp(end_timestamp).isoformat(),
-                         granularity=granularity)
-        data = pd.concat([df, pd.DataFrame(newData, columns=columns)])
-        
-        return data
     
     
     def feed(self):
         raise NotImplementedError
     
-    
-    @classmethod
-    def get_historic_rates(cls, client, product, start_date, end_date, 
-                                   granularity=1):
-        """
-        Gets the historical data of a product making the necessary
-        calls to the GDAX API and returns a pandas DataFrame with
-        the data.
-        """
-        startDate = dt.datetime.strptime(start_date, "%Y-%m-%d")
-        startDateTimestamp = startDate.timestamp()
-        endDate = dt.datetime.strptime(end_date, "%Y-%m-%d")
-        endDateTimestamp = endDate.timestamp()
-        
-        # List of time divisions for retrieving data.
-        timeRange = range(int(startDateTimestamp), int(endDateTimestamp), 
-                          200 * granularity)
-        timeRange = list(timeRange) + [endDateTimestamp]
-        
-        # New DataFrame.
-        columns = ['time', 'low', 'high', 'open', 'close', 'volume']
-        data = pd.DataFrame(columns=columns)
-        
-        # Populating dataframe.
-        for i in tqdm(range(len(timeRange) - 1)):
-            try:
-                data = cls.append_data(client, data, product, columns, 
-                                        timeRange[i], timeRange[i+1])
-            except ValueError:
-                time.sleep(3)
-                data = cls.append_data(data, columns, product, 
-                                        timeRange[i], timeRange[i+1])
-        
-        # Reindexing dataframe.
-        data['time'] = data.time.apply(dt.datetime.fromtimestamp)
-        data.set_index('time', inplace=True)
-        
-        # Using data points where the price has changed.
-        data = data.where(data.close != data.close.shift()).dropna().sort_index()
-        
-        return data
-    
-    def publish(self, msg):
-        for s in self.subscribers:
-            s.receive(msg)
-        
-    def subscribe(self, subscriber):
-        self.subscribers.append(subscriber)
-    
-
-class HistoricalDataFeeder(DataFeeder):
-    """
-    Data feeder for backtesting purposes.
-    It uses historical data prices to feed a strategy.
-    """
-    def feed(self, data):
-        for t, p in tqdm(zip(data.index, data.open.values)):
-            self.strategy.calculate(t, p, 'BID')
         
 
 class RealTimeFeeder(DataFeeder, gdax.WebsocketClient):
@@ -140,9 +69,7 @@ class AllMesages(gdax.WebsocketClient):
     def on_message(self, msg):
         print(msg)
     
-    def feed(self, data):
-        self.strategy.calculate(data[0], float(data[1]), data[2])
-        
+
         
 if __name__ == "__main__":
     f = AllMesages()
